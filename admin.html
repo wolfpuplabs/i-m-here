@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peta Live Panitia</title>
+    
+    <!-- Memuat Leaflet CSS & JS untuk Peta -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 0; 
+        }
+        header { 
+            background: #343a40; 
+            color: white; 
+            padding: 15px; 
+            text-align: center; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            position: relative;
+            z-index: 999;
+        }
+        h2 { margin: 0; font-size: 20px; }
+        #map { 
+            height: calc(100vh - 54px); /* Sisa layar dikurangi tinggi header */
+            width: 100%; 
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h2>Peta Pemantauan Peserta (Live)</h2>
+</header>
+
+<div id="map"></div>
+
+<script type="module">
+    // Menggunakan Firebase Modular SDK (v10)
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+
+    // 1. MASUKKAN FIREBASE CONFIG ANDA DI SINI (Harus sama dengan yang di index.html)
+    const firebaseConfig = {
+        apiKey: "API_KEY_ANDA",
+        authDomain: "PROYEK_ANDA.firebaseapp.com",
+        databaseURL: "https://PROYEK_ANDA-default-rtdb.firebaseio.com",
+        projectId: "PROYEK_ANDA",
+        storageBucket: "PROYEK_ANDA.appspot.com",
+        messagingSenderId: "SENDER_ID",
+        appId: "APP_ID"
+    };
+
+    // Inisialisasi Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // Inisialisasi Peta Leaflet (Posisi default di tengah Indonesia)
+    const map = L.map('map').setView([-2.5489, 118.0148], 5);
+    
+    // Memuat tampilan jalan dari OpenStreetMap
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19
+    }).addTo(map);
+
+    // Objek untuk menyimpan semua marker peserta
+    let markers = {};
+    let isFirstLoad = true;
+
+    // Mendengarkan perubahan data di folder 'peserta_travel'
+    const pesertaRef = ref(db, 'peserta_travel');
+    
+    onValue(pesertaRef, (snapshot) => {
+        let adaPeserta = false;
+        
+        snapshot.forEach((childSnapshot) => {
+            adaPeserta = true;
+            const nama = childSnapshot.key;
+            const data = childSnapshot.val();
+
+            // Jika peserta sudah punya marker di peta, cukup pindahkan posisinya
+            if (markers[nama]) {
+                markers[nama].setLatLng([data.lat, data.lon]);
+                markers[nama].getPopup().setContent(`<b>${nama}</b><br><small>Update: ${data.waktu}</small>`);
+            } 
+            // Jika belum ada, buat marker baru
+            else {
+                const marker = L.marker([data.lat, data.lon]).addTo(map);
+                marker.bindPopup(`<b>${nama}</b><br><small>Update: ${data.waktu}</small>`);
+                markers[nama] = marker;
+            }
+        });
+
+        // Zoom otomatis ke peserta jika baru pertama kali dimuat
+        if (isFirstLoad && adaPeserta) {
+            // Menggabungkan semua titik lokasi untuk menentukan kotak area (bounding box)
+            const latLngs = Object.values(markers).map(m => m.getLatLng());
+            const bounds = L.latLngBounds(latLngs);
+            
+            // Menyesuaikan zoom agar semua peserta terlihat (maksimal zoom 15)
+            map.fitBounds(bounds, { maxZoom: 15, padding: [30, 30] });
+            isFirstLoad = false;
+        }
+    });
+</script>
+
+</body>
+</html>
