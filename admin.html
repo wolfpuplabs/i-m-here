@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Peta Live Panitia</title>
     
-    <!-- Memuat Leaflet CSS & JS untuk Peta -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
@@ -30,7 +29,6 @@
             width: 100%; 
         }
 
-        /* Desain khusus untuk Label Nama Peserta Permanen di Peta */
         .label-peserta {
             background-color: rgba(255, 255, 255, 0.95);
             border: 1px solid #007bff;
@@ -54,7 +52,7 @@
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-    import { getDatabase, ref, onValue, update } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+    import { getDatabase, ref, onValue, update, remove } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 
     // 1. MASUKKAN FIREBASE CONFIG ANDA DI SINI
     const firebaseConfig = {
@@ -67,11 +65,9 @@
   appId: "1:964549084043:web:a5176dc4055d93acc0658e"
     };
 
-    // Inisialisasi Firebase
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-    // Inisialisasi Peta Leaflet (Posisi default di tengah Indonesia)
     const map = L.map('map').setView([-2.5489, 118.0148], 5);
     
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -82,31 +78,37 @@
     let markers = {};
     let isFirstLoad = true;
 
-    // Fungsi untuk mematikan pelacakan peserta dari sisi admin
+    // Fungsi tombol hentikan dari admin
     window.hentikanPeserta = function(nama) {
-        if(confirm(`Apakah Anda yakin ingin mematikan pelacakan lokasi untuk ${nama}?`)) {
+        if(confirm(`Apakah Anda yakin ingin mematikan pelacakan untuk ${nama}?`)) {
             update(ref(db, 'peserta_travel/' + nama), {
                 forceStop: true
             }).then(() => {
-                alert(`Sinyal berhenti berhasil dikirim ke HP ${nama}`);
-            }).catch((err) => {
-                alert(`Gagal mengirim sinyal: ${err.message}`);
+                alert(`Sinyal berhenti terkirim ke HP ${nama}`);
             });
         }
     };
 
-    // Mendengarkan data live dari Firebase Realtime Database
     const pesertaRef = ref(db, 'peserta_travel');
     
     onValue(pesertaRef, (snapshot) => {
+        const dataTerbaru = snapshot.val() || {};
+
+        // 1. OTOMATIS HAPUS MARKER DARI PETA jika peserta tutup web / tekan stop
+        Object.keys(markers).forEach((nama) => {
+            if (!dataTerbaru[nama]) {
+                map.removeLayer(markers[nama]); // Hapus layer dari peta
+                delete markers[nama];           // Hapus referensi dari variabel
+            }
+        });
+
+        // 2. TAMBAH / UPDATE MARKER
         let adaPeserta = false;
-        
         snapshot.forEach((childSnapshot) => {
             adaPeserta = true;
             const nama = childSnapshot.key;
             const data = childSnapshot.val();
 
-            // Format isi Popup saat marker diklik
             let popupContent = `<b>${nama}</b><br><small>Update: ${data.waktu}</small>`;
             if(data.forceStop) {
                 popupContent += `<br><span style="color:red; font-size:12px;"><b>(Telah Dihentikan Admin)</b></span>`;
@@ -114,19 +116,14 @@
                 popupContent += `<br><button onclick="hentikanPeserta('${nama}')" style="margin-top:6px; padding:4px 8px; background:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Hentikan HP Peserta</button>`;
             }
 
-            // Jika marker peserta sudah ada di peta, cukup perbarui lokasinya
             if (markers[nama]) {
                 markers[nama].setLatLng([data.lat, data.lon]);
                 markers[nama].getPopup().setContent(popupContent);
-            } 
-            // Jika peserta baru masuk, buatkan marker + label nama permanen
-            else {
+            } else {
                 const marker = L.marker([data.lat, data.lon]).addTo(map);
-                
-                // Tambahkan Pop-up detail (muncul saat diklik)
                 marker.bindPopup(popupContent);
                 
-                // Tambahkan Label Nama Permanen (selalu terlihat di bawah marker)
+                // Label Nama Permanen di Bawah Marker
                 marker.bindTooltip(nama, {
                     permanent: true,
                     direction: 'bottom',
@@ -138,11 +135,9 @@
             }
         });
 
-        // Zoom otomatis agar semua peserta terlihat saat pertama kali peta dimuat
         if (isFirstLoad && adaPeserta) {
             const latLngs = Object.values(markers).map(m => m.getLatLng());
-            const bounds = L.latLngBounds(latLngs);
-            map.fitBounds(bounds, { maxZoom: 15, padding: [40, 40] });
+            map.fitBounds(L.latLngBounds(latLngs), { maxZoom: 15, padding: [40, 40] });
             isFirstLoad = false;
         }
     });
