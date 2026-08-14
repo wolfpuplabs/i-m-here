@@ -40,6 +40,14 @@
         button:hover { 
             background-color: #0056b3; 
         }
+        /* Desain khusus untuk tombol berhenti */
+        #btnStop {
+            background-color: #dc3545; 
+            display: none; /* Disembunyikan di awal */
+        }
+        #btnStop:hover {
+            background-color: #c82333;
+        }
         #status { 
             margin-top: 15px; 
             color: #555; 
@@ -55,35 +63,41 @@
     <p>Aktifkan GPS (Lokasi) di HP Anda, masukkan nama, lalu klik tombol di bawah.</p>
     
     <input type="text" id="nama_peserta" placeholder="Masukkan Nama Anda (Cth: Budi)" required>
-    <button id="btnBagikan">Mulai</button>
+    
+    <button id="btnBagikan">Start</button>
+    <!-- Tombol Berhenti ditambahkan di sini -->
+    <button id="btnStop">Stop</button>
 
     <div id="status"></div>
 </div>
 
 <script type="module">
-    // Menggunakan Firebase Modular SDK (v10)
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-    import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+    import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 
     // 1. MASUKKAN FIREBASE CONFIG ANDA DI SINI
     const firebaseConfig = {
         apiKey: "AIzaSyCkk5gSI5Ura1zTElaCIJiSsNI33QeBLFA",
-  authDomain: "imhere-eba76.firebaseapp.com",
-  databaseURL: "https://imhere-eba76-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "imhere-eba76",
-  storageBucket: "imhere-eba76.firebasestorage.app",
-  messagingSenderId: "964549084043",
-  appId: "1:964549084043:web:a5176dc4055d93acc0658e"
+  authDomain: "imhere-eba76.firebaseapp.com",
+  databaseURL: "https://imhere-eba76-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "imhere-eba76",
+  storageBucket: "imhere-eba76.firebasestorage.app",
+  messagingSenderId: "964549084043",
+  appId: "1:964549084043:web:a5176dc4055d93acc0658e"
     };
 
-    // Inisialisasi Firebase
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
     let watcherId = null;
 
-    document.getElementById("btnBagikan").addEventListener("click", () => {
-        const nama = document.getElementById("nama_peserta").value.trim();
-        const statusDiv = document.getElementById("status");
+    const btnBagikan = document.getElementById("btnBagikan");
+    const btnStop = document.getElementById("btnStop");
+    const statusDiv = document.getElementById("status");
+    const inputNama = document.getElementById("nama_peserta");
+
+    // FUNGSI MULAI
+    btnBagikan.addEventListener("click", () => {
+        const nama = inputNama.value.trim();
 
         if (!nama) {
             alert("Harap masukkan nama Anda terlebih dahulu!");
@@ -91,41 +105,79 @@
         }
 
         if (navigator.geolocation) {
-            statusDiv.innerHTML = "<i>Meminta izin akses GPS...<br>(Mohon izinkan jika ada pop-up dari browser)</i>";
+            statusDiv.innerHTML = "<i>Meminta izin akses GPS...</i>";
             
-            // Menonaktifkan tombol agar tidak diklik berkali-kali
-            document.getElementById("btnBagikan").disabled = true;
-            document.getElementById("btnBagikan").style.backgroundColor = "#6c757d";
+            // Ubah tampilan tombol
+            btnBagikan.style.display = "none";
+            btnStop.style.display = "block";
+            inputNama.disabled = true;
 
-            // Melacak posisi secara real-time
             watcherId = navigator.geolocation.watchPosition(
                 (position) => {
                     const lat = position.coords.latitude;
                     const lon = position.coords.longitude;
                     const waktu = new Date().toLocaleTimeString('id-ID');
 
-                    // Mengirim data ke Realtime Database
                     set(ref(db, 'peserta_travel/' + nama), {
                         lat: lat,
                         lon: lon,
                         waktu: waktu
                     }).then(() => {
-                        statusDiv.innerHTML = `<span style="color: #28a745;"><b>Berhasil!</b><br>Lokasi Anda terus diperbarui secara otomatis. Biarkan halaman ini tetap terbuka.<br><br><small>Update Terakhir: ${waktu}</small></span>`;
-                    }).catch((error) => {
-                        statusDiv.innerHTML = `<span style="color: red;">Gagal mengirim data: ${error.message}</span>`;
+                        statusDiv.innerHTML = `<span style="color: #28a745;"><b>Berhasil!</b><br>Lokasi Anda terus diperbarui secara otomatis.<br><br><small>Update Terakhir: ${waktu}</small></span>`;
                     });
                 }, 
                 (error) => {
-                    statusDiv.innerHTML = `<span style="color: red;"><b>Gagal melacak lokasi.</b><br>Pastikan GPS menyala dan Anda telah memberikan izin akses lokasi pada browser ini.</span>`;
-                    document.getElementById("btnBagikan").disabled = false;
-                    document.getElementById("btnBagikan").style.backgroundColor = "#007bff";
+                    statusDiv.innerHTML = `<span style="color: red;">Gagal melacak lokasi. Pastikan GPS menyala.</span>`;
+                    kembalikanTampilan();
                 },
                 { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
             );
+
+            // Mendengarkan jika admin mematikan paksa (fitur sebelumnya)
+            const userRef = ref(db, 'peserta_travel/' + nama);
+            onValue(userRef, (snapshot) => {
+                const data = snapshot.val();
+                if (data && data.forceStop === true) {
+                    hentikanPelacakan("<b>Berhenti!</b><br>Pelacakan lokasi Anda telah dimatikan oleh Admin.");
+                }
+            });
+
         } else {
-            document.getElementById("status").innerHTML = "Browser HP Anda tidak mendukung fitur pelacakan lokasi.";
+            statusDiv.innerHTML = "Browser HP Anda tidak mendukung pelacakan lokasi.";
         }
     });
+
+    // FUNGSI BERHENTI (Ditekan oleh Peserta)
+    btnStop.addEventListener("click", () => {
+        const nama = inputNama.value.trim();
+        
+        // Hentikan pelacakan di HP
+        hentikanPelacakan("<b>Berhenti!</b><br>Anda telah menghentikan pelacakan lokasi.");
+        
+        // Opsional: Beritahu database bahwa peserta berhenti (agar muncul info di peta admin)
+        if (nama) {
+            update(ref(db, 'peserta_travel/' + nama), {
+                waktu: "Berhenti membagikan lokasi"
+            });
+        }
+    });
+
+    // Fungsi bantuan untuk menghentikan GPS
+    function hentikanPelacakan(pesan) {
+        if (watcherId !== null) {
+            navigator.geolocation.clearWatch(watcherId);
+            watcherId = null;
+        }
+        statusDiv.innerHTML = `<span style="color: red;">${pesan}</span>`;
+        kembalikanTampilan();
+    }
+
+    // Fungsi bantuan untuk mereset tombol
+    function kembalikanTampilan() {
+        btnBagikan.style.display = "block";
+        btnStop.style.display = "none";
+        inputNama.disabled = false;
+    }
 </script>
 
 </body>
