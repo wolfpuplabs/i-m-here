@@ -40,10 +40,9 @@
         button:hover { 
             background-color: #0056b3; 
         }
-        /* Desain khusus untuk tombol berhenti */
         #btnStop {
             background-color: #dc3545; 
-            display: none; /* Disembunyikan di awal */
+            display: none; 
         }
         #btnStop:hover {
             background-color: #c82333;
@@ -64,15 +63,15 @@
     
     <input type="text" id="nama_peserta" placeholder="Enter Your Name (Ex: Budi)" required>
     
-    <button id="btnBagikan">Start Sharing Location</button>
-    <button id="btnStop">Stop Sharing Location</button>
+    <button id="btnBagikan">Start</button>
+    <button id="btnStop">Stop</button>
 
     <div id="status"></div>
 </div>
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+    import { getDatabase, ref, set, onValue, onDisconnect, remove } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 
     // 1. MASUKKAN FIREBASE CONFIG ANDA DI SINI
     const firebaseConfig = {
@@ -85,7 +84,6 @@
   appId: "1:964549084043:web:a5176dc4055d93acc0658e"
     };
 
-    // Inisialisasi Firebase
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
     let watcherId = null;
@@ -95,9 +93,7 @@
     const statusDiv = document.getElementById("status");
     const inputNama = document.getElementById("nama_peserta");
 
-    // FUNGSI MULAI BAGIKAN LOKASI
     btnBagikan.addEventListener("click", () => {
-        // Membersihkan spasi berlebih & mengubah ke huruf kecil agar tidak ada nama ganda di Firebase
         const nama = inputNama.value.trim().toLowerCase();
 
         if (!nama) {
@@ -108,20 +104,22 @@
         if (navigator.geolocation) {
             statusDiv.innerHTML = "<i>Meminta izin akses GPS...</i>";
             
-            // Ubah tampilan tombol & kunci input nama
             btnBagikan.style.display = "none";
             btnStop.style.display = "block";
             inputNama.disabled = true;
 
-            // Mulai pelacakan GPS secara terus menerus
+            const userRef = ref(db, 'peserta_travel/' + nama);
+
+            // OTOMATIS HAPUS dari database jika browser/tab peserta DITUTUP
+            onDisconnect(userRef).remove();
+
             watcherId = navigator.geolocation.watchPosition(
                 (position) => {
                     const lat = position.coords.latitude;
                     const lon = position.coords.longitude;
                     const waktu = new Date().toLocaleTimeString('id-ID');
 
-                    // Update koordinat ke Firebase Realtime Database
-                    set(ref(db, 'peserta_travel/' + nama), {
+                    set(userRef, {
                         lat: lat,
                         lon: lon,
                         waktu: waktu,
@@ -131,18 +129,18 @@
                     });
                 }, 
                 (error) => {
-                    statusDiv.innerHTML = `<span style="color: red;">Gagal melacak lokasi. Pastikan GPS menyala dan izin lokasi diberikan.</span>`;
+                    statusDiv.innerHTML = `<span style="color: red;">Gagal melacak lokasi. Pastikan GPS menyala.</span>`;
                     kembalikanTampilan();
                 },
                 { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
             );
 
-            // Mendengarkan jika Admin mematikan paksa dari peta pemantauan
-            const userRef = ref(db, 'peserta_travel/' + nama);
+            // Mendengarkan sinyal stop dari Admin
             onValue(userRef, (snapshot) => {
                 const data = snapshot.val();
                 if (data && data.forceStop === true) {
                     hentikanPelacakan("<b>Berhenti!</b><br>Pelacakan lokasi Anda telah dimatikan oleh Admin.");
+                    remove(userRef); // Hapus data di database
                 }
             });
 
@@ -151,21 +149,18 @@
         }
     });
 
-    // FUNGSI BERHENTI (Klik Tombol Stop oleh Peserta)
+    // Hapus data dari database jika tombol STOP ditekan
     btnStop.addEventListener("click", () => {
         const nama = inputNama.value.trim().toLowerCase();
+        const userRef = ref(db, 'peserta_travel/' + nama);
         
         hentikanPelacakan("<b>Berhenti!</b><br>Anda telah menghentikan pelacakan lokasi.");
         
-        // Kirim info status ke admin bahwa peserta telah berhenti
         if (nama) {
-            update(ref(db, 'peserta_travel/' + nama), {
-                waktu: "Berhenti membagikan lokasi"
-            });
+            remove(userRef);
         }
     });
 
-    // Fungsi pembantu untuk mematikan watchPosition GPS
     function hentikanPelacakan(pesan) {
         if (watcherId !== null) {
             navigator.geolocation.clearWatch(watcherId);
@@ -175,7 +170,6 @@
         kembalikanTampilan();
     }
 
-    // Fungsi pembantu untuk mereset tombol ke tampilan awal
     function kembalikanTampilan() {
         btnBagikan.style.display = "block";
         btnStop.style.display = "none";
