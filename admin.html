@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Peta Live Panitia</title>
     
-    <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
@@ -25,15 +24,22 @@
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
             position: relative;
             z-index: 999;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         h2 { margin: 0; font-size: 18px; }
         
-        /* Desain Toggle Button di Header */
+        .header-controls {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
         .toggle-container {
             display: flex;
             align-items: center;
             gap: 8px;
-            font-size: 14px;
+            font-size: 13px;
             background: rgba(255,255,255,0.1);
             padding: 5px 10px;
             border-radius: 20px;
@@ -41,8 +47,8 @@
         .switch {
             position: relative;
             display: inline-block;
-            width: 38px;
-            height: 22px;
+            width: 34px;
+            height: 20px;
         }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider {
@@ -54,17 +60,17 @@
         }
         .slider:before {
             position: absolute; content: "";
-            height: 16px; width: 16px;
+            height: 14px; width: 14px;
             left: 3px; bottom: 3px;
             background-color: white;
             transition: .4s;
             border-radius: 50%;
         }
         input:checked + .slider { background-color: #28a745; }
-        input:checked + .slider:before { transform: translateX(16px); }
+        input:checked + .slider:before { transform: translateX(14px); }
 
         #map { 
-            height: calc(100vh - 48px); 
+            height: calc(100vh - 54px); 
             width: 100%; 
         }
 
@@ -84,14 +90,24 @@
 <body>
 
 <header>
-    <h2>Peta Pemantauan Peserta</h2>
-    <!-- TOGGLE BUTTON HISTORY -->
-    <div class="toggle-container">
-        <span>Tampilkan Jejak Rute</span>
-        <label class="switch">
-            <input type="checkbox" id="toggleHistory" checked>
-            <span class="slider"></span>
-        </label>
+    <h2>Participant Monitoring Map</h2>
+    <div class="header-controls">
+        <!-- TOGGLE BUTTON HISTORY -->
+        <div class="toggle-container">
+            <span>Show Route Trace</span>
+            <label class="switch">
+                <input type="checkbox" id="toggleHistory" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+        <!-- TOGGLE BUTTON STOP PESERTA (BARU) -->
+        <div class="toggle-container">
+            <span>Show 'Stop' on Participant</span>
+            <label class="switch">
+                <input type="checkbox" id="toggleStopBtn" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
     </div>
 </header>
 
@@ -99,7 +115,7 @@
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-    import { getDatabase, ref, onValue, update } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+    import { getDatabase, ref, onValue, update, remove, set } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 
     // 1. MASUKKAN FIREBASE CONFIG ANDA DI SINI
     const firebaseConfig = {
@@ -123,16 +139,34 @@
     }).addTo(map);
 
     let markers = {};
-    let polyLines = {};  // Menyimpan garis rute lintasan
-    let pathHistory = {}; // Menyimpan riwayat [lat, lon] tiap peserta
+    let polyLines = {};  
+    let pathHistory = {}; 
     let isFirstLoad = true;
-    let showHistory = true; // Status toggle (default: AKTIF)
+    let showHistory = true; 
 
-    // Event Listener Toggle Switch
+    // --- LOGIKA PENGATURAN TOMBOL STOP PESERTA ---
+    const toggleStopBtn = document.getElementById("toggleStopBtn");
+    const pengaturanRef = ref(db, 'pengaturan/showStopButton');
+
+    // Baca status dari database (sinkronisasi antar admin jika ada lebih dari 1)
+    onValue(pengaturanRef, (snapshot) => {
+        const val = snapshot.val();
+        if (val !== null) {
+            toggleStopBtn.checked = val;
+        } else {
+            set(pengaturanRef, true); // Default nyala jika belum diatur
+        }
+    });
+
+    // Ubah database saat admin memencet toggle
+    toggleStopBtn.addEventListener("change", (e) => {
+        set(pengaturanRef, e.target.checked);
+    });
+    // ----------------------------------------------
+
+    // Event Listener Toggle Switch (History Jalur)
     document.getElementById("toggleHistory").addEventListener("change", (e) => {
         showHistory = e.target.checked;
-        
-        // Sembunyikan atau Tampilkan semua garis rute di peta
         Object.keys(polyLines).forEach(nama => {
             if (showHistory) {
                 map.addLayer(polyLines[nama]);
@@ -142,13 +176,15 @@
         });
     });
 
-    // Fungsi tombol hentikan dari admin
+    // Fungsi hentikan dari admin
     window.hentikanPeserta = function(nama) {
         if(confirm(`Apakah Anda yakin ingin mematikan pelacakan untuk ${nama}?`)) {
             update(ref(db, 'peserta_travel/' + nama), {
                 forceStop: true
             }).then(() => {
-                alert(`Sinyal berhenti terkirim ke HP ${nama}`);
+                setTimeout(() => {
+                    remove(ref(db, 'peserta_travel/' + nama));
+                }, 2000);
             });
         }
     };
@@ -158,7 +194,6 @@
     onValue(pesertaRef, (snapshot) => {
         const dataTerbaru = snapshot.val() || {};
 
-        // 1. HAPUS MARKER & GARIS RUTE jika peserta keluar/stop
         Object.keys(markers).forEach((nama) => {
             if (!dataTerbaru[nama]) {
                 map.removeLayer(markers[nama]);
@@ -169,7 +204,6 @@
             }
         });
 
-        // 2. TAMBAH / UPDATE MARKER DAN GARIS LINTASAN
         let adaPeserta = false;
         snapshot.forEach((childSnapshot) => {
             adaPeserta = true;
@@ -177,11 +211,7 @@
             const data = childSnapshot.val();
             const posBaru = [data.lat, data.lon];
 
-            // Simpan riwayat jejak posisi ke array
-            if (!pathHistory[nama]) {
-                pathHistory[nama] = [];
-            }
-            // Cegah simpan koordinat duplikat beruntun
+            if (!pathHistory[nama]) pathHistory[nama] = [];
             const lastPos = pathHistory[nama][pathHistory[nama].length - 1];
             if (!lastPos || lastPos[0] !== posBaru[0] || lastPos[1] !== posBaru[1]) {
                 pathHistory[nama].push(posBaru);
@@ -194,41 +224,25 @@
                 popupContent += `<br><button onclick="hentikanPeserta('${nama}')" style="margin-top:6px; padding:4px 8px; background:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Hentikan HP Peserta</button>`;
             }
 
-            // Jika peserta sudah ada, update posisi marker & perbarui garis lintasan
             if (markers[nama]) {
                 markers[nama].setLatLng(posBaru);
                 markers[nama].getPopup().setContent(popupContent);
-                
-                // Update garis rute lintasan
-                if (polyLines[nama]) {
-                    polyLines[nama].setLatLngs(pathHistory[nama]);
-                }
+                if (polyLines[nama]) polyLines[nama].setLatLngs(pathHistory[nama]);
             } else {
-                // Buat Marker Baru
                 const marker = L.marker(posBaru).addTo(map);
                 marker.bindPopup(popupContent);
                 
                 marker.bindTooltip(nama, {
-                    permanent: true,
-                    direction: 'bottom',
-                    className: 'label-peserta',
-                    offset: [0, 5]
+                    permanent: true, direction: 'bottom', className: 'label-peserta', offset: [0, 5]
                 });
 
                 markers[nama] = marker;
 
-                // Buat Garis Rute (Polyline) Baru berwarna Biru
                 polyLines[nama] = L.polyline(pathHistory[nama], {
-                    color: '#007bff',
-                    weight: 4,
-                    opacity: 0.7,
-                    dashArray: '5, 10' // Garis putus-putus
+                    color: '#007bff', weight: 4, opacity: 0.7, dashArray: '5, 10'
                 });
 
-                // Tambahkan ke peta jika Toggle sedang ON
-                if (showHistory) {
-                    polyLines[nama].addTo(map);
-                }
+                if (showHistory) polyLines[nama].addTo(map);
             }
         });
 
