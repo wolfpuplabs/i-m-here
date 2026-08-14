@@ -26,8 +26,21 @@
         }
         h2 { margin: 0; font-size: 20px; }
         #map { 
-            height: calc(100vh - 54px); /* Sisa layar dikurangi tinggi header */
+            height: calc(100vh - 54px); 
             width: 100%; 
+        }
+
+        /* Desain khusus untuk Label Nama Peserta Permanen di Peta */
+        .label-peserta {
+            background-color: rgba(255, 255, 255, 0.95);
+            border: 1px solid #007bff;
+            border-radius: 4px;
+            font-weight: bold;
+            color: #333;
+            font-size: 12px;
+            padding: 2px 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            white-space: nowrap;
         }
     </style>
 </head>
@@ -40,19 +53,18 @@
 <div id="map"></div>
 
 <script type="module">
-    // Menggunakan Firebase Modular SDK (v10)
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+    import { getDatabase, ref, onValue, update } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 
-    // 1. MASUKKAN FIREBASE CONFIG ANDA DI SINI (Harus sama dengan yang di index.html)
+    // 1. MASUKKAN FIREBASE CONFIG ANDA DI SINI
     const firebaseConfig = {
-        apiKey: "AIzaSyCkk5gSI5Ura1zTElaCIJiSsNI33QeBLFA",
-  authDomain: "imhere-eba76.firebaseapp.com",
-  databaseURL: "https://imhere-eba76-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "imhere-eba76",
-  storageBucket: "imhere-eba76.firebasestorage.app",
-  messagingSenderId: "964549084043",
-  appId: "1:964549084043:web:a5176dc4055d93acc0658e"
+        apiKey: "API_KEY_ANDA",
+        authDomain: "PROYEK_ANDA.firebaseapp.com",
+        databaseURL: "https://PROYEK_ANDA-default-rtdb.firebaseio.com",
+        projectId: "PROYEK_ANDA",
+        storageBucket: "PROYEK_ANDA.appspot.com",
+        messagingSenderId: "SENDER_ID",
+        appId: "APP_ID"
     };
 
     // Inisialisasi Firebase
@@ -62,17 +74,28 @@
     // Inisialisasi Peta Leaflet (Posisi default di tengah Indonesia)
     const map = L.map('map').setView([-2.5489, 118.0148], 5);
     
-    // Memuat tampilan jalan dari OpenStreetMap
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
         maxZoom: 19
     }).addTo(map);
 
-    // Objek untuk menyimpan semua marker peserta
     let markers = {};
     let isFirstLoad = true;
 
-    // Mendengarkan perubahan data di folder 'peserta_travel'
+    // Fungsi untuk mematikan pelacakan peserta dari sisi admin
+    window.hentikanPeserta = function(nama) {
+        if(confirm(`Apakah Anda yakin ingin mematikan pelacakan lokasi untuk ${nama}?`)) {
+            update(ref(db, 'peserta_travel/' + nama), {
+                forceStop: true
+            }).then(() => {
+                alert(`Sinyal berhenti berhasil dikirim ke HP ${nama}`);
+            }).catch((err) => {
+                alert(`Gagal mengirim sinyal: ${err.message}`);
+            });
+        }
+    };
+
+    // Mendengarkan data live dari Firebase Realtime Database
     const pesertaRef = ref(db, 'peserta_travel');
     
     onValue(pesertaRef, (snapshot) => {
@@ -83,27 +106,43 @@
             const nama = childSnapshot.key;
             const data = childSnapshot.val();
 
-            // Jika peserta sudah punya marker di peta, cukup pindahkan posisinya
+            // Format isi Popup saat marker diklik
+            let popupContent = `<b>${nama}</b><br><small>Update: ${data.waktu}</small>`;
+            if(data.forceStop) {
+                popupContent += `<br><span style="color:red; font-size:12px;"><b>(Telah Dihentikan Admin)</b></span>`;
+            } else {
+                popupContent += `<br><button onclick="hentikanPeserta('${nama}')" style="margin-top:6px; padding:4px 8px; background:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Hentikan HP Peserta</button>`;
+            }
+
+            // Jika marker peserta sudah ada di peta, cukup perbarui lokasinya
             if (markers[nama]) {
                 markers[nama].setLatLng([data.lat, data.lon]);
-                markers[nama].getPopup().setContent(`<b>${nama}</b><br><small>Update: ${data.waktu}</small>`);
+                markers[nama].getPopup().setContent(popupContent);
             } 
-            // Jika belum ada, buat marker baru
+            // Jika peserta baru masuk, buatkan marker + label nama permanen
             else {
                 const marker = L.marker([data.lat, data.lon]).addTo(map);
-                marker.bindPopup(`<b>${nama}</b><br><small>Update: ${data.waktu}</small>`);
+                
+                // Tambahkan Pop-up detail (muncul saat diklik)
+                marker.bindPopup(popupContent);
+                
+                // Tambahkan Label Nama Permanen (selalu terlihat di bawah marker)
+                marker.bindTooltip(nama, {
+                    permanent: true,
+                    direction: 'bottom',
+                    className: 'label-peserta',
+                    offset: [0, 5]
+                });
+
                 markers[nama] = marker;
             }
         });
 
-        // Zoom otomatis ke peserta jika baru pertama kali dimuat
+        // Zoom otomatis agar semua peserta terlihat saat pertama kali peta dimuat
         if (isFirstLoad && adaPeserta) {
-            // Menggabungkan semua titik lokasi untuk menentukan kotak area (bounding box)
             const latLngs = Object.values(markers).map(m => m.getLatLng());
             const bounds = L.latLngBounds(latLngs);
-            
-            // Menyesuaikan zoom agar semua peserta terlihat (maksimal zoom 15)
-            map.fitBounds(bounds, { maxZoom: 15, padding: [30, 30] });
+            map.fitBounds(bounds, { maxZoom: 15, padding: [40, 40] });
             isFirstLoad = false;
         }
     });
